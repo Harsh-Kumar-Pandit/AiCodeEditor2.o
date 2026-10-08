@@ -8,6 +8,7 @@ import repositoryRoutes from "./routes/repository.routes.js";
 import repositoryFileRoutes from "./routes/repository-file.routes.js";
 import branchRoutes from "./routes/branch.routes.js";
 import fileContentRoutes from "./routes/file-content.routes.js";
+import aiRoutes from "./routes/ai.routes.js";
 
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use("/api/repositories", repositoryRoutes);
 app.use("/api/repositories", repositoryFileRoutes);
 app.use("/api/repositories", branchRoutes);
 app.use("/api/repositories", fileContentRoutes);
+app.use("/api/ai", aiRoutes);
 
 app.get("/api/health", async (req, res) => {
     try {

@@ -88,6 +88,9 @@ const Workspace = () => {
     const [originalContent, setOriginalContent] = useState("");
     const [loadingFile, setLoadingFile] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
+    const [aiMessage, setAiMessage] = useState("");
+    const [aiResponse, setAiResponse] = useState("");
+    const [aiLoading, setAiLoading] = useState(false);
 
     useEffect(() => {
         const fetchRepositoryTree = async () => {
@@ -176,6 +179,31 @@ const Workspace = () => {
         }
     };
 
+    const handleAIChat = async () => {
+        if (!aiMessage.trim()) return;
+
+        try {
+            setAiLoading(true);
+
+            const response = await api.post("/ai/chat", {
+                message: aiMessage,
+                file: selectedFile,
+                code: fileContent,
+                repositoryStructure: tree.map((item) => ({
+                    path: item.path,
+                    type: item.type
+                })),
+                repositoryId: `${owner}/${repo}`
+            });
+
+            setAiResponse(response.data.response);
+        } catch (error) {
+            console.error("AI request failed:", error);
+            setAiResponse("Failed to get AI response.");
+        } finally {
+            setAiLoading(false);
+        }
+    };
     return (
         <div className="min-h-screen bg-gray-950 text-white">
             {/* Header */}
@@ -292,9 +320,29 @@ const Workspace = () => {
 
                     {/* AI Chat */}
                     <aside className="col-span-3 rounded-xl border border-gray-800 bg-gray-900 p-4">
-                        <h2 className="font-semibold mb-4">
-                            AI Assistant
-                        </h2>
+                        <div className="flex flex-col gap-3">
+                            <textarea
+                                value={aiMessage}
+                                onChange={(e) => setAiMessage(e.target.value)}
+                                placeholder="Ask RepoMind anything..."
+                                className="w-full rounded-lg bg-gray-800 p-3 text-sm text-white outline-none"
+                                rows={4}
+                            />
+
+                            <button
+                                onClick={handleAIChat}
+                                disabled={aiLoading}
+                                className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
+                            >
+                                {aiLoading ? "Thinking..." : "Ask AI"}
+                            </button>
+
+                            {aiResponse && (
+                                <div className="rounded-lg bg-gray-800 p-3 text-sm text-gray-200 whitespace-pre-wrap">
+                                    {aiResponse}
+                                </div>
+                            )}
+                        </div>
 
                         <p className="text-sm text-gray-500">
                             Ask RepoMind about your codebase.
