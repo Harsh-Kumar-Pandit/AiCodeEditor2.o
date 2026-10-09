@@ -9,6 +9,7 @@ import repositoryFileRoutes from "./routes/repository-file.routes.js";
 import branchRoutes from "./routes/branch.routes.js";
 import fileContentRoutes from "./routes/file-content.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+import gitRoutes from "./routes/git.routes.js";
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use("/api/repositories", repositoryFileRoutes);
 app.use("/api/repositories", branchRoutes);
 app.use("/api/repositories", fileContentRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/git", gitRoutes);
 
 app.get("/api/health", async (req, res) => {
     try {

@@ -8,16 +8,16 @@ export const indexFile = async ({
     content
 }) => {
     const chunks = chunkCode(content);
-
     const indexedChunks = [];
 
     for (const chunk of chunks) {
-        const embedding = await generateEmbedding(chunk);
+        const embedding = await generateEmbedding(chunk.content);
 
         const savedChunk = await saveCodeChunk({
             repositoryId,
             filePath,
-            content: chunk,
+            content: chunk.content,
+            chunkIndex: chunk.index,
             embedding
         });
 

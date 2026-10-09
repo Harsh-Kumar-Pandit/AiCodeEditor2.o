@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../services/api";
-import Editor from "@monaco-editor/react";
+import Editor, { DiffEditor } from "@monaco-editor/react";
 
 const FileTree = ({ nodes, level = 0, onFileClick }) => {
     return (
@@ -91,6 +91,12 @@ const Workspace = () => {
     const [aiMessage, setAiMessage] = useState("");
     const [aiResponse, setAiResponse] = useState("");
     const [aiLoading, setAiLoading] = useState(false);
+    const [proposedChanges, setProposedChanges] = useState([]);
+    const [selectedChangeIndex, setSelectedChangeIndex] = useState(0);
+    const [originalContents, setOriginalContents] = useState({});
+    const [checkpoint, setCheckpoint] = useState(null);
+    const [approvedChanges, setApprovedChanges] = useState([]);
+    const [isCommitting, setIsCommitting] = useState(false);
 
     useEffect(() => {
         const fetchRepositoryTree = async () => {
@@ -118,6 +124,12 @@ const Workspace = () => {
 
         fetchRepositoryTree();
     }, [owner, repo, selectedBranch]);
+
+    useEffect(() => {
+        if (!selectedBranch) return;
+
+        handleIndexRepository();
+    }, [selectedBranch]);
 
     useEffect(() => {
         const fetchBranches = async () => {
@@ -204,6 +216,209 @@ const Workspace = () => {
             setAiLoading(false);
         }
     };
+
+    const handleIndexRepository = async () => {
+        try {
+            const response = await api.post(
+                `/repositories/${owner}/${repo}/index`,
+                {
+                    branch: selectedBranch
+                }
+            );
+
+            console.log("Repository indexed:", response.data);
+        } catch (error) {
+            console.error(
+                "Repository indexing failed:",
+                error.response?.data || error.message
+            );
+        }
+    };
+
+
+    const handleAcceptChange = () => {
+        const change = proposedChanges[selectedChangeIndex];
+
+        if (!change || change.operation === "delete_file") {
+            return;
+        }
+
+        const currentOriginal = originalContents[change.path];
+
+        if (typeof currentOriginal !== "string") {
+            console.error("Original file content is unavailable.");
+            return;
+        }
+
+        setCheckpoint({
+            path: change.path,
+            content: currentOriginal,
+            acceptedContent: change.content
+        });
+
+        setApprovedChanges((previous) => {
+            const remaining = previous.filter(
+                (item) => item.path !== change.path
+            );
+
+            return [
+                ...remaining,
+                {
+                    operation: change.operation,
+                    path: change.path,
+                    content: change.content,
+                    originalContent: currentOriginal
+                }
+            ];
+        });
+
+        setSelectedFile(change.path);
+        setOriginalContent(currentOriginal);
+        setFileContent(change.content);
+        setIsDirty(change.content !== currentOriginal);
+
+        setProposedChanges((previous) =>
+            previous.filter((_, index) => index !== selectedChangeIndex)
+        );
+
+        setSelectedChangeIndex(0);
+    };
+
+
+    const handleUndo = () => {
+        if (!checkpoint) return;
+
+        setSelectedFile(checkpoint.path);
+        setFileContent(checkpoint.content);
+        setOriginalContent(checkpoint.content);
+        setIsDirty(false);
+
+        setApprovedChanges((previous) =>
+            previous.filter((change) => change.path !== checkpoint.path)
+        );
+
+        setCheckpoint(null);
+    };
+
+
+    const handleCommitApprovedChanges = async () => {
+        if (approvedChanges.length === 0 || isCommitting) return;
+
+        const newBranch = `repomind/${Date.now()}`;
+
+        try {
+            setIsCommitting(true);
+
+            const response = await api.post("/git/commit", {
+                owner,
+                repo,
+                baseBranch: selectedBranch || "main",
+                newBranch,
+                message: `RepoMind: apply ${approvedChanges.length} approved change(s)`,
+                changes: approvedChanges.map((change) => ({
+                    operation: change.operation,
+                    path: change.path,
+                    content: change.content
+                }))
+            });
+
+            console.log("GitHub commit created:", response.data);
+
+            setApprovedChanges([]);
+            setIsDirty(false);
+
+            window.alert(
+                `Committed successfully to ${response.data.branch}`
+            );
+        } catch (error) {
+            console.error(
+                "GitHub commit failed:",
+                error.response?.data || error.message
+            );
+
+            window.alert(
+                error.response?.data?.message || "Failed to commit changes."
+            );
+        } finally {
+            setIsCommitting(false);
+        }
+    };
+
+
+    const testCreateBranch = async () => {
+        try {
+            const response = await api.post("/git/branch", {
+                owner,
+                repo,
+                baseBranch: selectedBranch || "main",
+                newBranch: `repomind-test-${Date.now()}`
+            });
+
+            console.log("Branch created:", response.data);
+        } catch (error) {
+            console.error(
+                "Branch creation failed:",
+                error.response?.data || error.message
+            );
+        }
+    };
+
+    const testCodeChanges = async () => {
+        try {
+            const response = await api.post("/ai/changes", {
+                repositoryId: `${owner}/${repo}`,
+                question: selectedFile
+                    ? `Review ${selectedFile} and suggest one meaningful improvement. Use the retrieved repository context and return the complete updated file content.`
+                    : "Analyze the repository and suggest one meaningful improvement to an existing file. Only propose a change when you have sufficient context."
+            });
+
+            console.log("Proposed changes:", response.data);
+            const changes = response.data.changes || [];
+            setProposedChanges(changes);
+            setSelectedChangeIndex(0);
+
+            const originals = {};
+
+            for (const change of changes) {
+                if (change.operation === "create_file") {
+                    originals[change.path] = "";
+                    continue;
+                }
+
+                if (change.operation === "delete_file") {
+                    continue;
+                }
+
+                try {
+                    const fileResponse = await api.get(
+                        `/repositories/${owner}/${repo}/file`,
+                        {
+                            params: {
+                                path: change.path,
+                                branch: selectedBranch
+                            }
+                        }
+                    );
+
+                    originals[change.path] = fileResponse.data.content;
+                } catch (error) {
+                    console.error(
+                        `Failed to fetch original content for ${change.path}:`,
+                        error.response?.data || error.message
+                    );
+                }
+            }
+
+            setOriginalContents(originals);
+        } catch (error) {
+            console.error(
+                "Code changes test failed:",
+                error.response?.data || error.message
+            );
+        }
+    };
+
+
     return (
         <div className="min-h-screen bg-gray-950 text-white">
             {/* Header */}
@@ -284,6 +499,28 @@ const Workspace = () => {
                                     ● Unsaved changes
                                 </span>
                             )}
+
+                            {checkpoint && (
+                                <button
+                                    onClick={handleUndo}
+                                    className="rounded-lg border border-gray-700 px-3 py-2 text-sm hover:bg-gray-800"
+                                >
+                                    Undo Accepted Change
+                                </button>
+                            )}
+
+                            {approvedChanges.length > 0 && (
+                                <button
+                                    onClick={handleCommitApprovedChanges}
+                                    disabled={isCommitting}
+                                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {isCommitting
+                                        ? "Committing..."
+                                        : `Commit ${approvedChanges.length} Approved Change(s)`}
+                                </button>
+                            )}
+
                         </div>
                         <div className="h-[80%] overflow-hidden rounded-lg bg-gray-950">
                             {loadingFile ? (
@@ -318,6 +555,84 @@ const Workspace = () => {
                         </div>
                     </section>
 
+                    {proposedChanges.length > 0 && (
+                        <section className="col-span-12 rounded-xl border border-gray-800 bg-gray-900 p-4">
+                            <div className="mb-4 flex items-center justify-between">
+                                <div>
+                                    <h2 className="font-semibold">AI Proposed Changes</h2>
+                                    <p className="mt-1 text-sm text-gray-400">
+                                        {proposedChanges[selectedChangeIndex]?.path}
+                                    </p>
+                                </div>
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={handleAcceptChange}
+                                        className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                                    >
+                                        Accept
+                                    </button>
+
+                                    <button
+                                        onClick={() => {
+                                            setProposedChanges((previous) =>
+                                                previous.filter((_, index) => index !== selectedChangeIndex)
+                                            );
+                                            setSelectedChangeIndex(0);
+                                        }}
+                                        className="rounded-lg border border-red-500 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10"
+                                    >
+                                        Reject
+                                    </button>
+
+                                    <button
+                                        onClick={() => setProposedChanges([])}
+                                        className="rounded-lg border border-gray-700 px-3 py-2 text-sm hover:bg-gray-800"
+                                    >
+                                        Close Diff
+                                    </button>
+                                </div>
+
+                            </div>
+
+                            <div className="mb-3 flex flex-wrap gap-2">
+                                {proposedChanges.map((change, index) => (
+                                    <button
+                                        key={`${change.path}-${index}`}
+                                        onClick={() => setSelectedChangeIndex(index)}
+                                        className={`rounded-lg px-3 py-2 text-sm ${index === selectedChangeIndex
+                                            ? "bg-white text-black"
+                                            : "bg-gray-800 text-gray-300"
+                                            }`}
+                                    >
+                                        {change.path}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {proposedChanges[selectedChangeIndex] && (
+                                <DiffEditor
+                                    height="450px"
+                                    theme="vs-dark"
+                                    original={
+                                        originalContents[
+                                        proposedChanges[selectedChangeIndex]?.path
+                                        ] ?? ""
+                                    }
+                                    modified={proposedChanges[selectedChangeIndex].content || ""}
+                                    language="javascript"
+                                    options={{
+                                        readOnly: true,
+                                        renderSideBySide: true,
+                                        minimap: { enabled: false },
+                                        automaticLayout: true
+                                    }}
+                                />
+                            )}
+                        </section>
+                    )}
+
+
                     {/* AI Chat */}
                     <aside className="col-span-3 rounded-xl border border-gray-800 bg-gray-900 p-4">
                         <div className="flex flex-col gap-3">
@@ -348,6 +663,12 @@ const Workspace = () => {
                             Ask RepoMind about your codebase.
                         </p>
                     </aside>
+                    <button onClick={testCodeChanges}>
+                        Test AI Changes
+                    </button>
+                    <button onClick={testCreateBranch}>
+                        Test Create Branch
+                    </button>
 
                 </div>
             </main>

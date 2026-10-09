@@ -52,3 +52,27 @@ export const saveCodeChunk = async ({
 
     return result[0];
 };
+
+export const getRepositoryFileContent = async ({
+    repositoryId,
+    filePath
+}) => {
+    const chunks = await prisma.codeChunk.findMany({
+        where: {
+            repositoryId,
+            filePath
+        },
+        orderBy: {
+            createdAt: "asc"
+        },
+        select: {
+            content: true
+        }
+    });
+
+    if (chunks.length === 0) {
+        return null;
+    }
+
+    return chunks.map((chunk) => chunk.content).join("");
+};

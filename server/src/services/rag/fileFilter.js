@@ -10,10 +10,29 @@ const ignoredDirectories = [
 const allowedExtensions = [
     ".js",
     ".jsx",
+    ".mjs",
+    ".cjs",
     ".json",
-    ".md",
     ".css",
-    ".html"
+    ".html",
+
+    ".py",
+
+    ".java",
+
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+
+    ".ts",
+    ".tsx",
+
+    ".md",
+    ".yaml",
+    ".yml",
+
+    ".sql"
 ];
 
 const ignoredFiles = [

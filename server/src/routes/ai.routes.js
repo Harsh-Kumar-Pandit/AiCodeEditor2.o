@@ -2,6 +2,7 @@ import express from "express";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { generateAIResponse } from "../services/ai/aiProvider.js";
 import { askRepository } from "../services/rag/ragService.js";
+import { proposeCodeChanges } from "../controllers/aiChanges.controller.js";
 
 const router = express.Router();
 
@@ -79,5 +80,7 @@ Rules:
         });
     }
 });
+
+router.post("/changes", requireAuth, proposeCodeChanges);
 
 export default router;

@@ -14,3 +14,18 @@ const paths = [
 for (const path of paths) {
     console.log(path, "=>", shouldIndexFile(path));
 }
+
+console.log(
+    "backend/main.py =>",
+    shouldIndexFile("backend/main.py")
+);
+
+console.log(
+    ".env =>",
+    shouldIndexFile(".env")
+);
+
+console.log(
+    ".env.local =>",
+    shouldIndexFile(".env.local")
+);

@@ -1,28 +1,119 @@
-import { searchSimilarChunks } from "./search.js";
-import { generateGeminiResponse } from "../ai/gemini.js";
 
-export const askRepository = async ({
+import {
+    searchSimilarChunks,
+    searchKeywordChunks
+} from "./search.js";
+
+import { generateAIResponse } from "../ai/aiProvider.js";
+
+export const retrieveRepositoryContext = async ({
     repositoryId,
     question
 }) => {
-    const chunks = await searchSimilarChunks({
+    const semanticChunks = await searchSimilarChunks({
         repositoryId,
         query: question,
-        limit: 5
+        limit: 10
     });
 
-    const context = chunks
+    const keywordChunks = await searchKeywordChunks({
+        repositoryId,
+        query: question,
+        limit: 10
+    });
+
+    const chunks = [
+        ...semanticChunks,
+        ...keywordChunks
+    ];
+
+    const uniqueChunks = Array.from(
+        new Map(
+            chunks.map((chunk) => [chunk.id, chunk])
+        ).values()
+    );
+
+    const semanticRank = new Map(
+        semanticChunks.map((chunk, index) => [
+            chunk.id,
+            index + 1
+        ])
+    );
+
+    const keywordRank = new Map(
+        keywordChunks.map((chunk, index) => [
+            chunk.id,
+            index + 1
+        ])
+    );
+
+    const rankedChunks = uniqueChunks
+        .map((chunk) => {
+            const semanticPosition = semanticRank.get(chunk.id);
+            const keywordPosition = keywordRank.get(chunk.id);
+
+            const semanticScore = semanticPosition
+                ? 1 / (60 + semanticPosition)
+                : 0;
+
+            const keywordScore = keywordPosition
+                ? 1 / (60 + keywordPosition)
+                : 0;
+
+            return {
+                ...chunk,
+                finalScore: semanticScore + keywordScore
+            };
+        })
+        .sort((a, b) => b.finalScore - a.finalScore);
+
+    const selectedFiles = new Set();
+
+    const finalChunks = rankedChunks
+        .filter((chunk) => {
+            if (selectedFiles.has(chunk.filePath)) {
+                return false;
+            }
+
+            selectedFiles.add(chunk.filePath);
+            return true;
+        })
+        .slice(0, 10);
+
+    const context = finalChunks
         .map(
             (chunk, index) =>
                 `Code Context ${index + 1}
 File: ${chunk.filePath}
-Similarity: ${chunk.similarity}
 Code:
 ${chunk.content}`
         )
         .join("\n\n");
 
-    const response = await generateGeminiResponse([
+    const sources = finalChunks.map((chunk) => ({
+        filePath: chunk.filePath,
+        similarity: chunk.similarity,
+        keywordScore: chunk.keyword_score,
+        finalScore: chunk.finalScore
+    }));
+
+    return {
+        context,
+        sources
+    };
+};
+
+export const askRepository = async ({
+    repositoryId,
+    question
+}) => {
+    const { context, sources } =
+        await retrieveRepositoryContext({
+            repositoryId,
+            question
+        });
+
+    const response = await generateAIResponse([
         {
             role: "system",
             content: `You are RepoMind, an AI coding assistant.
@@ -48,9 +139,6 @@ ${question}`
 
     return {
         response,
-        sources: chunks.map((chunk) => ({
-            filePath: chunk.filePath,
-            similarity: chunk.similarity
-        }))
+        sources
     };
 };
